@@ -1,0 +1,163 @@
+﻿@page "/"
+<MapView @ref="_mapView" Longitude="_longitude" Latitude="_latitude" Zoom="11" Style="height: calc(100vh - 130px); width: 100%;" OnViewRendered="ViewRendered">
+    <Map ArcGisDefaultBasemap="@baseMap" @ref="_map">
+        <GraphicsLayer @ref="routeLayer"  Title="Route"/>
+        <GraphicsLayer @ref="pointsLayer" Title="Points"/>
+    </Map>
+    <ScaleBarWidget Position="OverlayPosition.BottomLeft" />
+    <LayerListWidget Position="OverlayPosition.BottomRight" />
+</MapView>
+<button @onclick="DrawRoute" disabled="@DisableDrawRoute">Draw Route</button>
+<Label>@DidItWork</Label>
+@code {
+    /*
+     * This page will draw a route and points on the map using the code behind
+     * The points are drawn on a layer defined in the markup and on a layer defined in the code behind
+     * Only the points on the layer defined in the markup will be visible.
+     * Adding a point to the code behind layer will throw an exception
+     */
+    private readonly double _latitude = 42.634261;
+    private readonly double _longitude = -73.746207;
+
+    // These will work
+    GraphicsLayer? pointsLayer;
+    GraphicsLayer? routeLayer;
+
+    // This will not work
+    GraphicsLayer? customLayer;
+
+    bool DisableDrawRoute { get; set; } = true;
+    string DidItWork { get; set; } = "Tap the button";
+
+    MapView? _mapView;
+    Map? _map;
+
+    private Graphic? _graphic;
+    private readonly List<Point> _points = new();
+
+    string baseMap = "arcgis-navigation";
+
+    // Use the default WGS84 spatial reference for extents
+    SpatialReference spatialReference = new SpatialReference(4326);
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+
+        #region predefined points
+        _points.Clear();
+        _points.Add(new Point(-73.70079, 42.75188));
+        _points.Add(new Point(-73.70059, 42.74985));
+        _points.Add(new Point(-73.70087, 42.74773));
+        _points.Add(new Point(-73.70097, 42.74688));
+        _points.Add(new Point(-73.70348, 42.74683));
+        _points.Add(new Point(-73.70486, 42.74702));
+        _points.Add(new Point(-73.70541, 42.7485));
+        _points.Add(new Point(-73.70494, 42.75194));
+        _points.Add(new Point(-73.70421, 42.75238));
+        _points.Add(new Point(-73.70301, 42.75244));
+        _points.Add(new Point(-73.70256, 42.75246));
+        _points.Add(new Point(-73.70222, 42.75422));
+        _points.Add(new Point(-73.70157, 42.75433));
+        _points.Add(new Point(-73.70054, 42.75446));
+        _points.Add(new Point(-73.70079, 42.75218));
+        #endregion
+    }
+
+    Task ViewRendered()
+    {
+        DisableDrawRoute = false;
+
+        if (customLayer == null)
+        {
+            customLayer = new GraphicsLayer(null, "Code Behind", 1.0, true, ListMode.Show);
+            return _mapView!.AddLayer(customLayer);
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task DrawRoute()
+    {
+        DidItWork = String.Empty;
+        DisableDrawRoute = true;
+
+        MyExtent extent = new();
+        MapPath routeMap = new()
+        ;
+        foreach (Point point in _points)
+        {
+            // Update the extent with the new point
+            extent.ReadLatLon(point.Latitude ?? 0.0, point.Longitude ?? 0.0);
+
+            // Add the point to the path
+            routeMap.Add(new MapPoint(point.Longitude!.Value, point.Latitude!.Value));
+        }
+
+        // Embiggen the extent a bit
+        _ = extent.Expand(1.3);
+
+        // Create a new GeoBlazor/ESRI extent from the extent we just calculated
+        Extent NewExtent = new Extent(xmax: extent.MaxLongitude, xmin: extent.MinLongitude, ymax: extent.MaxLatitude, ymin: extent.MinLatitude, spatialReference: spatialReference);
+
+        // Zoom to the extent
+        await _mapView!.GoTo(NewExtent);
+
+
+        // Create a new polyline from the path
+        var polyPaths = new List<MapPath>();
+        polyPaths.Add(routeMap);
+
+        var polyLine = new PolyLine(polyPaths.ToArray(), spatialReference);
+
+
+        // To draw a line with a stroked outline, we need to draw two lines, one inside the other
+        var gInside = new Graphic(polyLine, new SimpleLineSymbol(new MapColor("white"), width: 3, LineStyle.Solid));
+        var gOutside = new Graphic(polyLine, new SimpleLineSymbol(new MapColor("black"), width: 5, LineStyle.Solid));
+
+        // Add the lines to the graphics layer in the correct order
+        await routeLayer!.Add(gOutside);
+        await routeLayer!.Add(gInside);
+
+        // Add the points to the graphics layer
+        foreach (Point point in _points)
+        {
+            // Create the marker symbol with colors for the outline and fill and size
+            SimpleMarkerSymbol symbol = new SimpleMarkerSymbol(new Outline(new MapColor("blue")),
+                new MapColor("green"), 10);
+
+            // Create a marker graphic for the symbol and it's location
+            var marker = new Graphic(
+                            new Point(point.Longitude, point.Latitude),
+                            symbol);
+
+            // Add the marker to the graphics layer
+            await pointsLayer!.Add(marker);
+        }
+
+        // Add the points to the custom graphics layer
+        foreach (Point point in _points)
+        {
+            // Create the marker symbol with colors for the outline and fill and size
+            SimpleMarkerSymbol symbol = new SimpleMarkerSymbol(new Outline(new MapColor("blue")),
+                new MapColor("red"), 10);
+
+            // Create a marker graphic for the symbol and it's location
+            var marker = new Graphic(
+                            new Point(point.Longitude, point.Latitude),
+                            symbol);
+
+            // Add the marker to the graphics layer
+            try
+            {
+                await customLayer!.Add(marker);
+            }
+            catch (Exception ex)
+            {
+                DidItWork = $"Exception when adding the marker: {ex.Message}";
+                break;
+            }
+        }
+
+        DisableDrawRoute = false;
+    }
+}
